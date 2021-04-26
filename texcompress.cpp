@@ -223,9 +223,12 @@ rdo_bc::rdo_bc_params getRDODefaults()
     rp.m_rdo_max_threads = std::min(std::max(1, omp_get_max_threads()), 128);
     rp.m_status_output = false;
     rp.m_use_bc7e = true;
-    rp.m_rdo_lambda = 1.f;
-    rp.m_lookback_window_size = 256;
+    rp.m_rdo_lambda = 1.0f;
+    rp.m_lookback_window_size = 1024;
     rp.m_custom_lookback_window_size = true;
+
+    //rp.m_rdo_smooth_block_error_scale = 70.f;
+    //rp.m_custom_rdo_smooth_block_error_scale = true;
 
     return rp;
 }
@@ -257,11 +260,22 @@ static CompressedMip compressBC5(const image_u8 &src,
 {
     auto rp = getRDODefaults();
     rp.m_dxgi_format = DXGI_FORMAT_BC5_UNORM;
-    rp.m_bc45_channel0 = first_channel;
-    rp.m_bc45_channel1 = second_channel;
+    // These options don't work properly with RDO
+    rp.m_bc45_channel0 = 0;
+    rp.m_bc45_channel1 = 1;
+
+    image_u8 src_new(src.width(), src.height());
+    for (int i = 0; i < (int)src.total_pixels(); i++) {
+        const auto &src_pix = src.get_pixels()[i];
+        auto &dst_pix = src_new.get_pixels()[i];
+        dst_pix[0] = src_pix[first_channel];
+        dst_pix[1] = src_pix[second_channel];
+        dst_pix[2] = 0.f;
+        dst_pix[3] = 1.f;
+    }
 
     rdo_bc::rdo_bc_encoder encoder;
-    if (!encoder.init(src, rp)) {
+    if (!encoder.init(src_new, rp)) {
         cerr << "Encoder init error\n" << endl;
         abort();
     }
@@ -325,10 +339,17 @@ int main(int argc, char *argv[])
     start[3] = src[3];
     bool uniform = true;
     for (int i = 0; i < (int)(src_width * src_height); i++) {
-        if (src[i * 4] != start[0] || src[i * 4 + 1] != start[1] ||
-            src[i * 4 + 2] != start[2] || src[i * 4 + 3] != start[3]) {
-            uniform = false;
-            break;
+        if (tex_type == TextureType::MetallicRoughness) {
+            if (src[i * 4 + 1] != start[1] || src[i * 4 + 2] != start[2]) {
+                uniform = false;
+                break;
+            }
+        } else {
+            if (src[i * 4] != start[0] || src[i * 4 + 1] != start[1] ||
+                src[i * 4 + 2] != start[2] || src[i * 4 + 3] != start[3]) {
+                uniform = false;
+                break;
+            }
         }
     }
 
