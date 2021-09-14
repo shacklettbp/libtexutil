@@ -329,6 +329,9 @@ int main(int argc, char *argv[])
             cerr << "Failed to load jpg: " << src_str << endl;
             exit(EXIT_FAILURE);
         }
+    } else {
+        cerr << "Unknown file type" << endl;
+        exit(EXIT_FAILURE);
     }
     printf("Loaded %s (%u, %u)\n", src_ext.c_str(), src_width, src_height);
 
@@ -376,6 +379,13 @@ int main(int argc, char *argv[])
         resample((uint8_t *)level.get_pixels().data(), src, srgb,
                  basisu::Resampler::Boundary_Op::BOUNDARY_CLAMP,
                  mips[0].width(), mips[0].height(), level_width, level_height, 4);
+        mips.push_back(level);
+    }
+
+    for (int level_idx = 0; level_idx < (int)num_levels; level_idx++) {
+        image_u8 &level = mips[level_idx];
+        uint32_t level_width = level.width();
+        uint32_t level_height = level.height();
 
         if (tex_type == TextureType::Normal) {
             for (int i = 0; i < int(level_width * level_height); i++) {
@@ -397,35 +407,40 @@ int main(int argc, char *argv[])
 
                 pixel[0] = uint8_t(min(255.f, roundf(((x + 1) / 2.f) * 255.f)));
                 pixel[1] = uint8_t(min(255.f, roundf(((y + 1) / 2.f) * 255.f)));
-                pixel[2] = uint8_t(min(255.f, roundf(((z + 1) / 2.f) * 255.f)));
+                pixel[2] = 0;
+                pixel[3] = 255;
             }
         }
 
-        mips.push_back(level);
+        if (tex_type == TextureType::MetallicRoughness) {
+            for (int i = 0; i < int(level_width * level_height); i++) {
+                auto &pixel = level.get_pixels()[i];
+                uint8_t r = pixel[1];
+                uint8_t m = pixel[2];
+                pixel[0] = r;
+                pixel[1] = m;
+                pixel[2] = 0;
+                pixel[3] = 255;
+            }
+        }
     }
-
-    vector<CompressedMip> compressed;
+    
+    vector<pair<uint8_t *, size_t>> compressed;
     compressed.reserve(num_levels);
     for (int level_idx = 0; level_idx < (int)num_levels; level_idx++) {
         const image_u8 &lvl = mips[level_idx];
-        if (tex_type == TextureType::BaseColor) {
-            compressed.push_back(compressBC7(lvl, false));
-        } else if (tex_type == TextureType::MetallicRoughness) {
-            compressed.push_back(compressBC5(lvl, 1, 2));
-        } else if (tex_type == TextureType::Normal) {
-            compressed.push_back(compressBC5(lvl, 0, 1));
-        }
 
-        image_u8 unpacked(lvl.width(), lvl.height());
-        compressed.back().unpack_blocks(unpacked);
-        lodepng_encode32_file((string("/tmp/t_") + to_string(level_idx) + string(".png")).c_str(),
-                              (uint8_t *)unpacked.get_pixels().data(), unpacked.width(),
-                              unpacked.height());
+        uint8_t *data;
+        size_t num_bytes;
+        uint32_t r = lodepng_encode32(&data, &num_bytes, (uint8_t *)lvl.get_pixels().data(), lvl.width(), lvl.height());
+        if (r) {
+            cerr << "PNG compression failed" << endl;
+            abort();
+        }
+        compressed.emplace_back(data, num_bytes);
     }
 
-    assert(compressed[0].get_bytes_per_block() == 16);
-
-    ofstream out_file(dst_str, ios::binary | ios::out);
+    ofstream out_file(dst_str, ios::binary | ios::out | ios::trunc);
     auto write = [&out_file](auto val) {
         out_file.write((const char *)&val, sizeof(decltype(val)));
     };
@@ -434,22 +449,15 @@ int main(int argc, char *argv[])
     write(uint32_t(num_levels));
     vector<uint32_t> out_offsets;
     uint32_t cur_offset = 0;
-    constexpr uint32_t block_size = 16;
     for (int level_idx = 0; level_idx < int(num_levels); level_idx++) {
         write(uint32_t(mips[level_idx].width()));
         write(uint32_t(mips[level_idx].height()));
         write(uint32_t(cur_offset));
-        write(uint32_t(compressed[level_idx].get_blocks_x()));
-        write(uint32_t(compressed[level_idx].get_blocks_y()));
-        uint32_t num_blocks =
-            compressed[level_idx].get_blocks_x() * compressed[level_idx].get_blocks_y();
-        write(uint32_t(num_blocks));
-        cur_offset += num_blocks * block_size;
+        write(uint32_t(compressed[level_idx].second));
+        cur_offset += compressed[level_idx].second;
     }
     for (int level_idx = 0; level_idx < int(num_levels); level_idx++) {
-        uint32_t num_blocks =
-            compressed[level_idx].get_blocks_x() * compressed[level_idx].get_blocks_y();
-        out_file.write((const char *)(compressed[level_idx].get_blocks()),
-                       block_size * num_blocks);
+        out_file.write((const char *)(compressed[level_idx].first), 
+                       compressed[level_idx].second);
     }
 }
