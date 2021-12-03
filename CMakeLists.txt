@@ -83,6 +83,11 @@ add_subdirectory(bc7enc_rdo)
 add_library(texutil
     texutil.cpp texutil.hpp)
 
+target_include_directories(texutil
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
 target_link_libraries(texutil PRIVATE
     bc7enc basisu OpenMP::OpenMP_CXX OpenImageIO)
 target_compile_definitions(texutil PRIVATE SUPPORT_BC7E)
