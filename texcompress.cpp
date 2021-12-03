@@ -7,14 +7,17 @@
 
 #include "encoder/basisu_resampler.h"
 #include "encoder/basisu_resampler_filters.h"
-#include "encoder/jpgd.h"
-#include "encoder/lodepng.h"
 #include "utils.h"
 #include "rdo_bc_encoder.h"
+
+#include "encoder/lodepng.h"
+#include <OpenImageIO/imageio.h>
+
 
 using namespace std;
 using namespace utils;
 using namespace rdo_bc;
+using namespace OIIO;
 
 template <typename T> inline T cclamp(T value, T low, T high) {
     return (value < low) ? low : ((value > high) ? high : value);
@@ -311,29 +314,41 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
+    cout << src_str << " " << dst_str << endl;
+
     string src_ext = src_str.substr(src_str.rfind(".") + 1);
 
-    uint8_t *src;
-    uint32_t src_width, src_height;
-    if (src_ext == "png") {
-        if (lodepng_decode32_file(&src, &src_width, &src_height,
-                                   src_str.c_str()) > 0) {
-            cerr << "Failed to load png: " << src_str << endl;
-            exit(EXIT_FAILURE);
-        }
-    } else if (src_ext == "jpg") {
-        int n;
-        src = jpgd::decompress_jpeg_image_from_file(
-            src_str.c_str(), (int *)&src_width, (int *)&src_height, &n, 4);
-        if (!src) {
-            cerr << "Failed to load jpg: " << src_str << endl;
-            exit(EXIT_FAILURE);
-        }
-    } else {
-        cerr << "Unknown file type" << endl;
+    auto src_img = ImageInput::open(src_str.c_str());
+    if (!src_img) {
+        cerr << "Failed to load " << src_str << endl;
         exit(EXIT_FAILURE);
     }
-    printf("Loaded %s (%u, %u)\n", src_ext.c_str(), src_width, src_height);
+
+    const auto &src_spec = src_img->spec();
+
+    uint32_t src_width = src_spec.width;
+    uint32_t src_height = src_spec.height;
+    uint32_t src_channels = src_spec.nchannels;
+
+    vector<uint8_t> src_staging;
+    src_staging.resize(src_width * src_height * src_channels);
+
+    src_img->read_image(TypeDesc::UINT8, src_staging.data());
+    src_img->close();
+
+    vector<uint8_t> src;
+    src.resize(src_width * src_height * 4);
+
+    for (int y = 0; y < (int)src_height; y++) {
+        for (int x = 0; x < (int)src_width; x++) {
+            for (int c = 0; c < (int)src_channels; c++) {
+                src[y * src_width * 4 + x * 4 + c] =
+                    src_staging[y * src_width * src_channels + x * src_channels + c];
+            }
+        }
+    }
+
+    printf("Loaded %u x %u\n", src_width, src_height);
 
     uint8_t start[4];
     start[0] = src[0];
@@ -369,14 +384,14 @@ int main(int argc, char *argv[])
     vector<image_u8> mips;
     mips.reserve(num_levels);
     mips.emplace_back(src_width, src_height);
-    memcpy(mips.back().get_pixels().data(), src, mips.back().total_pixels() * 4);
+    memcpy(mips.back().get_pixels().data(), src.data(), mips.back().total_pixels() * 4);
 
     for (int level_idx = 1; level_idx < (int)num_levels; level_idx++) {
         uint32_t level_width = max(1u, mips[0].width() >> level_idx);
         uint32_t level_height = max(1u, mips[0].height() >> level_idx);
         image_u8 level(level_width, level_height);
 
-        resample((uint8_t *)level.get_pixels().data(), src, srgb,
+        resample((uint8_t *)level.get_pixels().data(), src.data(), srgb,
                  basisu::Resampler::Boundary_Op::BOUNDARY_CLAMP,
                  mips[0].width(), mips[0].height(), level_width, level_height, 4);
         mips.push_back(level);

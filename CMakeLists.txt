@@ -84,7 +84,7 @@ add_executable(texcompress
     texcompress.cpp)
 
 target_link_libraries(texcompress PRIVATE
-    bc7enc basisu OpenMP::OpenMP_CXX)
+    bc7enc basisu OpenMP::OpenMP_CXX OpenImageIO)
 target_compile_definitions(texcompress PRIVATE SUPPORT_BC7E)
 target_compile_options(texcompress PRIVATE -no-pie)
 target_link_options(texcompress PRIVATE -no-pie)
