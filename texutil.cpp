@@ -12,7 +12,9 @@
 
 #include "encoder/lodepng.h"
 #include <OpenImageIO/imageio.h>
+#include <OpenImageIO/filesystem.h>
 
+#include "texutil.hpp"
 
 using namespace std;
 using namespace utils;
@@ -207,12 +209,6 @@ static void resample(uint8_t *dst_ptr, uint8_t *src_ptr, bool srgb,
       delete resamplers[i];
 }
 
-enum class TextureType {
-    BaseColor,
-    MetallicRoughness,
-    Normal,
-};
-
 using CompressedMip = rdo_bc::rdo_bc_encoder;
 
 enum class BlockFormat {
@@ -291,36 +287,16 @@ static CompressedMip compressBC5(const image_u8 &src,
     return encoder;
 }
 
-int main(int argc, char *argv[]) 
+namespace texutil {
+
+void generateMips(const char *out_path, TextureType tex_type,
+                  const uint8_t *input_data, uint64_t num_bytes)
 {
-    if (argc < 4) {
-        printf("%s TYPE SRC DST", argv[0]);
-        exit(EXIT_FAILURE);
-    }
+    Filesystem::IOMemReader buf_reader((void *)input_data, num_bytes);
 
-    string type_str = argv[1];
-    string src_str = argv[2];
-    string dst_str = argv[3];
-
-    TextureType tex_type;
-    if (type_str == "base") {
-        tex_type = TextureType::BaseColor;
-    } else if (type_str == "mr") {
-        tex_type = TextureType::MetallicRoughness;
-    } else if (type_str == "normal") {
-        tex_type = TextureType::Normal;
-    } else {
-        cerr << "Invalid texture type" << endl;
-        exit(EXIT_FAILURE);
-    }
-
-    cout << src_str << " " << dst_str << endl;
-
-    string src_ext = src_str.substr(src_str.rfind(".") + 1);
-
-    auto src_img = ImageInput::open(src_str.c_str());
+    auto src_img = ImageInput::open("tmp", nullptr, &buf_reader);
     if (!src_img) {
-        cerr << "Failed to load " << src_str << endl;
+        cerr << "Failed to load input for " << out_path << endl;
         exit(EXIT_FAILURE);
     }
 
@@ -357,7 +333,7 @@ int main(int argc, char *argv[])
     start[3] = src[3];
     bool uniform = true;
     for (int i = 0; i < (int)(src_width * src_height); i++) {
-        if (tex_type == TextureType::MetallicRoughness) {
+        if (tex_type == TextureType::TwoChannelLinear) {
             if (src[i * 4 + 1] != start[1] || src[i * 4 + 2] != start[2]) {
                 uniform = false;
                 break;
@@ -377,7 +353,7 @@ int main(int argc, char *argv[])
         src_height = 1;
     }
 
-    bool srgb = tex_type == TextureType::BaseColor;
+    bool srgb = tex_type == TextureType::FourChannelSRGB;
 
     uint32_t max_dim = max(src_width, src_height);
     uint32_t num_levels = log2(max_dim) + 1;
@@ -402,7 +378,7 @@ int main(int argc, char *argv[])
         uint32_t level_width = level.width();
         uint32_t level_height = level.height();
 
-        if (tex_type == TextureType::Normal) {
+        if (tex_type == TextureType::NormalMap) {
             for (int i = 0; i < int(level_width * level_height); i++) {
                 auto &pixel = level.get_pixels()[i];
                 uint8_t x_raw = pixel[0];
@@ -427,7 +403,7 @@ int main(int argc, char *argv[])
             }
         }
 
-        if (tex_type == TextureType::MetallicRoughness) {
+        if (tex_type == TextureType::TwoChannelLinear) {
             for (int i = 0; i < int(level_width * level_height); i++) {
                 auto &pixel = level.get_pixels()[i];
                 uint8_t r = pixel[1];
@@ -455,7 +431,7 @@ int main(int argc, char *argv[])
         compressed.emplace_back(data, num_bytes);
     }
 
-    ofstream out_file(dst_str, ios::binary | ios::out | ios::trunc);
+    ofstream out_file(out_path, ios::binary | ios::out | ios::trunc);
     auto write = [&out_file](auto val) {
         out_file.write((const char *)&val, sizeof(decltype(val)));
     };
@@ -475,4 +451,6 @@ int main(int argc, char *argv[])
         out_file.write((const char *)(compressed[level_idx].first), 
                        compressed[level_idx].second);
     }
+}
+
 }

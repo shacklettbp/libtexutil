@@ -80,11 +80,11 @@ target_include_directories(basisu PUBLIC SYSTEM
 
 add_subdirectory(bc7enc_rdo)
 
-add_executable(texcompress
-    texcompress.cpp)
+add_library(texutil
+    texutil.cpp texutil.hpp)
 
-target_link_libraries(texcompress PRIVATE
+target_link_libraries(texutil PRIVATE
     bc7enc basisu OpenMP::OpenMP_CXX OpenImageIO)
-target_compile_definitions(texcompress PRIVATE SUPPORT_BC7E)
-target_compile_options(texcompress PRIVATE -no-pie)
-target_link_options(texcompress PRIVATE -no-pie)
+target_compile_definitions(texutil PRIVATE SUPPORT_BC7E)
+target_compile_options(texutil PRIVATE -no-pie)
+target_link_options(texutil PRIVATE -no-pie)
