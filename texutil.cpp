@@ -10,7 +10,6 @@
 #include "utils.h"
 #include "rdo_bc_encoder.h"
 
-#include "encoder/lodepng.h"
 #include <OpenImageIO/imageio.h>
 #include <OpenImageIO/filesystem.h>
 
@@ -416,19 +415,21 @@ void generateMips(const char *out_path, TextureType tex_type,
         }
     }
     
-    vector<pair<uint8_t *, size_t>> compressed;
+    vector<vector<uint8_t>> compressed;
     compressed.reserve(num_levels);
     for (int level_idx = 0; level_idx < (int)num_levels; level_idx++) {
         const image_u8 &lvl = mips[level_idx];
 
-        uint8_t *data;
-        size_t num_bytes;
-        uint32_t r = lodepng_encode32(&data, &num_bytes, (uint8_t *)lvl.get_pixels().data(), lvl.width(), lvl.height());
-        if (r) {
-            cerr << "PNG compression failed" << endl;
-            abort();
-        }
-        compressed.emplace_back(data, num_bytes);
+        vector<uint8_t> data;
+        Filesystem::IOVecOutput oiio_adapter(data);
+
+        ImageSpec spec(lvl.width(), lvl.height(), 4, TypeDesc::UINT8);
+
+        auto out = ImageOutput::create("out.png", &oiio_adapter);
+        out->open("out.png", spec);
+        out->write_image(TypeDesc::UINT8, (uint8_t *)lvl.get_pixels().data());
+        out->close();
+        compressed.emplace_back(move(data));
     }
 
     ofstream out_file(out_path, ios::binary | ios::out | ios::trunc);
@@ -444,12 +445,12 @@ void generateMips(const char *out_path, TextureType tex_type,
         write(uint32_t(mips[level_idx].width()));
         write(uint32_t(mips[level_idx].height()));
         write(uint32_t(cur_offset));
-        write(uint32_t(compressed[level_idx].second));
-        cur_offset += compressed[level_idx].second;
+        write(uint32_t(compressed[level_idx].size()));
+        cur_offset += compressed[level_idx].size();
     }
     for (int level_idx = 0; level_idx < int(num_levels); level_idx++) {
-        out_file.write((const char *)(compressed[level_idx].first), 
-                       compressed[level_idx].second);
+        out_file.write((const char *)(compressed[level_idx].data()), 
+                       compressed[level_idx].size());
     }
 }
 

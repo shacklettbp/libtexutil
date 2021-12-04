@@ -1,7 +1,8 @@
 cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
 cmake_policy(VERSION 3.10)
 
-set(NAME texcompress)
+set(NAME libtexutil)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 IF (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     message(STATUS "Setting build type to RelWithDebInfo")
@@ -73,15 +74,18 @@ add_library(basisu STATIC
     basisu/encoder/jpgd.h
     basisu/encoder/lodepng.cpp
     basisu/encoder/lodepng.h)
-target_compile_options(basisu PRIVATE -no-pie)
 
 target_include_directories(basisu PUBLIC SYSTEM
     basisu)
 
 add_subdirectory(bc7enc_rdo)
 
-add_library(texutil
+add_library(texutil STATIC
     texutil.cpp texutil.hpp)
+
+add_executable(extract_tex
+    extract_tex.cpp
+)
 
 target_include_directories(texutil
     PUBLIC
@@ -91,5 +95,3 @@ target_include_directories(texutil
 target_link_libraries(texutil PRIVATE
     bc7enc basisu OpenMP::OpenMP_CXX OpenImageIO)
 target_compile_definitions(texutil PRIVATE SUPPORT_BC7E)
-target_compile_options(texutil PRIVATE -no-pie)
-target_link_options(texutil PRIVATE -no-pie)
