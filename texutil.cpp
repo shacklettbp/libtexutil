@@ -293,10 +293,19 @@ void generateMips(const char *out_path, TextureType tex_type,
 {
     Filesystem::IOMemReader buf_reader((void *)input_data, num_bytes);
 
-    auto src_img = ImageInput::open("tmp", nullptr, &buf_reader);
+    // Unfortunately not all OIIO plugins support ioproxy (reading from memory)
+    // Therefore, we temporarily use out_path to write out the input file &
+    // read back it back with OIIO
+
+    ofstream tmp_file(out_path, ios::binary);
+    tmp_file.write((char *)input_data, num_bytes);
+    tmp_file.close();
+ 
+    auto src_img = ImageInput::open(out_path, nullptr, &buf_reader);
     if (!src_img) {
-        cerr << "Failed to load input for " << out_path << endl;
-        exit(EXIT_FAILURE);
+        cerr << "Failed to load input for " << out_path << ": " <<
+            geterror() << endl;
+        abort();
     }
 
     const auto &src_spec = src_img->spec();
