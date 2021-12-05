@@ -323,6 +323,14 @@ void generateMips(const char *out_path, TextureType tex_type,
         }
     }
 
+    if (src_channels < 4) {
+        for (int y = 0; y < (int)src_height; y++) {
+            for (int x = 0; x < (int)src_width; x++) {
+                src[y * src_width * 4 + x * 4 + 3] = 255;
+            }
+        }
+    }
+
     printf("Loaded %u x %u\n", src_width, src_height);
 
     uint8_t start[4];
