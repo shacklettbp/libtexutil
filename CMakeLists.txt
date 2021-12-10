@@ -83,10 +83,6 @@ add_subdirectory(bc7enc_rdo)
 add_library(texutil STATIC
     texutil.cpp texutil.hpp)
 
-add_executable(extract_tex
-    extract_tex.cpp
-)
-
 target_include_directories(texutil
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
@@ -95,3 +91,15 @@ target_include_directories(texutil
 target_link_libraries(texutil PRIVATE
     bc7enc basisu OpenMP::OpenMP_CXX OpenImageIO)
 target_compile_definitions(texutil PRIVATE SUPPORT_BC7E)
+
+add_executable(extract_tex
+    extract_tex.cpp
+)
+
+add_executable(generate_tex
+    generate_tex.cpp
+)
+
+target_link_libraries(generate_tex
+    PRIVATE texutil
+)
