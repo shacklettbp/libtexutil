@@ -291,8 +291,6 @@ namespace texutil {
 void generateMips(const char *out_path, TextureType tex_type,
                   const uint8_t *input_data, uint64_t num_bytes)
 {
-    Filesystem::IOMemReader buf_reader((void *)input_data, num_bytes);
-
     // Unfortunately not all OIIO plugins support ioproxy (reading from memory)
     // Therefore, we temporarily use out_path to write out the input file &
     // read back it back with OIIO
@@ -301,7 +299,7 @@ void generateMips(const char *out_path, TextureType tex_type,
     tmp_file.write((char *)input_data, num_bytes);
     tmp_file.close();
  
-    auto src_img = ImageInput::open(out_path, nullptr, &buf_reader);
+    auto src_img = ImageInput::open(out_path);
     if (!src_img) {
         cerr << "Failed to load input for " << out_path << ": " <<
             geterror() << endl;
@@ -330,6 +328,23 @@ void generateMips(const char *out_path, TextureType tex_type,
                     src_staging[y * src_width * src_channels + x * src_channels + c];
             }
         }
+    }
+
+    if (tex_type == TextureType::FourChannelSRGB && src_channels == 1) {
+        for (int y = 0; y < (int)src_height; y++) {
+            for (int x = 0; x < (int)src_width; x++) {
+                for (int c = 1; c < 3; c++) {
+                    src[y * src_width * 4 + x * 4 + c] =
+                        src[y * src_width * 4 + x * 4];
+                }
+            }
+        }
+    }
+
+    if ((tex_type == TextureType::FourChannelSRGB && src_channels == 2) ||
+        (tex_type == TextureType::NormalMap && src_channels != 3)) {
+        cerr << "Unsupported type / num src channel configuration" << endl;
+        abort();
     }
 
     if (src_channels < 4) {
