@@ -341,12 +341,6 @@ void generateMips(const char *out_path, TextureType tex_type,
         }
     }
 
-    if ((tex_type == TextureType::FourChannelSRGB && src_channels == 2) ||
-        (tex_type == TextureType::NormalMap && src_channels != 3)) {
-        cerr << "Unsupported type / num src channel configuration" << endl;
-        abort();
-    }
-
     if (src_channels < 4) {
         for (int y = 0; y < (int)src_height; y++) {
             for (int x = 0; x < (int)src_width; x++) {
@@ -354,8 +348,54 @@ void generateMips(const char *out_path, TextureType tex_type,
             }
         }
     }
-
     printf("Loaded %u x %u\n", src_width, src_height);
+
+    bool is_two_channel =
+        tex_type == TextureType::TwoChannelLinearRG ||
+        tex_type == TextureType::TwoChannelLinearRB ||
+        tex_type == TextureType::TwoChannelLinearGB;
+
+    bool is_single_channel =
+        tex_type == TextureType::SingleChannelLinearR ||
+        tex_type == TextureType::SingleChannelLinearG ||
+        tex_type == TextureType::SingleChannelLinearB ||
+        tex_type == TextureType::SingleChannelLinearA;
+
+    int first_channel = -1;
+    int second_channel = -1;
+    if (tex_type == TextureType::TwoChannelLinearRG) {
+        first_channel = 0;
+        second_channel = 1;
+    } else if (tex_type == TextureType::TwoChannelLinearRB) {
+        first_channel = 0;
+        second_channel = 2;
+    } else if (tex_type == TextureType::TwoChannelLinearGB) {
+        first_channel = 1;
+        second_channel = 2;
+    } else if (tex_type == TextureType::SingleChannelLinearR) {
+        first_channel = 0;
+    } else if (tex_type == TextureType::SingleChannelLinearG) {
+        first_channel = 1;
+    } else if (tex_type == TextureType::SingleChannelLinearB) {
+        first_channel = 2;
+    } else if (tex_type == TextureType::SingleChannelLinearA) {
+        first_channel = 3;
+    }
+
+    if (tex_type == TextureType::FourChannelSRGB && src_channels == 2) {
+        cerr << "invalid: type = FourChannelSRGB && input channels = 2" << endl;
+        abort();
+    }
+
+    if (tex_type == TextureType::NormalMap && src_channels < 3) {
+        cerr << "invalid: type = NormalMap && input channels < 3" << endl;
+        abort();
+    }
+
+    if (is_two_channel && src_channels < 2) {
+        cerr << "invalid type = Two channel && input channels < 2" << endl;
+        abort();
+    }
 
     uint8_t start[4];
     start[0] = src[0];
@@ -364,8 +404,14 @@ void generateMips(const char *out_path, TextureType tex_type,
     start[3] = src[3];
     bool uniform = true;
     for (int i = 0; i < (int)(src_width * src_height); i++) {
-        if (tex_type == TextureType::TwoChannelLinear) {
-            if (src[i * 4 + 1] != start[1] || src[i * 4 + 2] != start[2]) {
+        if (is_two_channel) {
+            if (src[i * 4 + first_channel] != start[first_channel] ||
+                src[i * 4 + second_channel] != start[second_channel]) {
+                uniform = false;
+                break;
+            }
+        } else if (is_single_channel) {
+            if (src[i * 4 + first_channel] != start[first_channel]) {
                 uniform = false;
                 break;
             }
@@ -434,13 +480,24 @@ void generateMips(const char *out_path, TextureType tex_type,
             }
         }
 
-        if (tex_type == TextureType::TwoChannelLinear) {
+        if (is_two_channel) {
             for (int i = 0; i < int(level_width * level_height); i++) {
                 auto &pixel = level.get_pixels()[i];
-                uint8_t r = pixel[1];
-                uint8_t m = pixel[2];
-                pixel[0] = r;
-                pixel[1] = m;
+                uint8_t one = pixel[first_channel];
+                uint8_t two = pixel[second_channel];
+                pixel[0] = one;
+                pixel[1] = two;
+                pixel[2] = 0;
+                pixel[3] = 255;
+            }
+        }
+
+        if (is_single_channel) {
+            for (int i = 0; i < int(level_width * level_height); i++) {
+                auto &pixel = level.get_pixels()[i];
+                uint8_t v = pixel[first_channel];
+                pixel[0] = v;
+                pixel[1] = 0;
                 pixel[2] = 0;
                 pixel[3] = 255;
             }

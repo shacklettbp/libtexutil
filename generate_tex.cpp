@@ -19,8 +19,12 @@ int main(int argc, char *argv[])
     TextureType type;
     if (!strcmp(argv[3], "FourChannelSRGB")) {
         type = TextureType::FourChannelSRGB;
-    } else if (!strcmp(argv[3], "TwoChannelLinear")) {
-        type = TextureType::TwoChannelLinear;
+    } else if (!strcmp(argv[3], "TwoChannelLinearRG")) {
+        type = TextureType::TwoChannelLinearRG;
+    } else if (!strcmp(argv[3], "TwoChannelLinearRB")) {
+        type = TextureType::TwoChannelLinearRB;
+    } else if (!strcmp(argv[3], "TwoChannelLinearGB")) {
+        type = TextureType::TwoChannelLinearGB;
     } else if (!strcmp(argv[3], "NormalMap")) {
         type = TextureType::NormalMap;
     }

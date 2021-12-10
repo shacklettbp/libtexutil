@@ -4,7 +4,13 @@ namespace texutil {
 
 enum class TextureType : uint32_t {
     FourChannelSRGB,
-    TwoChannelLinear,
+    TwoChannelLinearRG,
+    TwoChannelLinearRB,
+    TwoChannelLinearGB,
+    SingleChannelLinearR,
+    SingleChannelLinearG,
+    SingleChannelLinearB,
+    SingleChannelLinearA,
     NormalMap,
 };
 
