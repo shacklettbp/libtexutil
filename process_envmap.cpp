@@ -253,6 +253,7 @@ int main(int argc, char *argv[])
         l /= total_luminance;
     }
 
+#if 0
     auto tmp_out = ImageOutput::create("/tmp/t.exr");
     ImageSpec tmp_spec(imp_dim, imp_dim, 1, TypeDesc::FLOAT);
     tmp_out->open("/tmp/t.exr", tmp_spec);
@@ -264,6 +265,7 @@ int main(int argc, char *argv[])
     tmp2_out->open("/tmp/t2.exr", tmp2_spec);
     tmp2_out->write_image(TypeDesc::FLOAT, src_data.data());
     tmp2_out->close();
+#endif
 
     generateAndWriteMips(env_out, imp_dim, imp_dim, 1, imp_data.data());
 }
