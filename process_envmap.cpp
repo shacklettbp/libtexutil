@@ -10,6 +10,11 @@ using namespace std;
 using namespace texutil;
 using namespace OIIO;
 
+inline uint64_t alignOffset(uint64_t offset, uint64_t alignment)
+{
+    return ((offset + alignment - 1) / alignment) * alignment;
+}
+
 int main(int argc, char *argv[])
 {
     if (argc < 3) {
@@ -28,45 +33,83 @@ int main(int argc, char *argv[])
     uint32_t src_width = src_spec.width;
     uint32_t src_height = src_spec.height;
     uint32_t src_channels = src_spec.nchannels;
-    assert(src_channels == 3);
 
-    vector<float> src_data(src_width * src_height * src_channels);
+    vector<float> src_stage(src_width * src_height * src_channels);
+    vector<float> src_data(src_width * src_height * 4, 1.f);
 
-    src_img->read_image(TypeDesc::FLOAT, src_data.data());
+    src_img->read_image(TypeDesc::FLOAT, src_stage.data());
     src_img->close();
+
+    for (int y = 0; y < (int)src_height; y++) {
+        for (int x = 0; x < (int)src_width; x++) {
+            for (int c = 0; c < (int)src_channels; c++) {
+                src_data[4 * (y * src_width + x) + c] =
+                    src_stage[src_channels * (y * src_width + x) + c];
+            }
+        }
+    }
 
     auto generateAndWriteMips = [](ofstream &file,
                                    uint32_t base_width,
                                    uint32_t base_height,
                                    uint32_t num_components,
                                    float *base_data) {
+        const uint32_t level_alignment = 16;
         uint32_t num_mips = log2(max(base_width, base_height)) + 1;
 
         uint32_t bytes_per_pixel = num_components * sizeof(float);
+        uint64_t top_bytes = base_width * base_height * bytes_per_pixel;
 
         file.write((char *)&num_mips, sizeof(uint32_t));
         file.write((char *)&base_width, sizeof(uint32_t));
         file.write((char *)&base_height, sizeof(uint32_t));
-        file.write((char *)base_data, base_width * base_height * bytes_per_pixel);
+
+        vector<vector<float>> mips;
+        mips.reserve(num_mips - 1);
+
+        uint64_t cur_offset = alignOffset(top_bytes, level_alignment);
 
         for (int level_idx = 1; level_idx < (int)num_mips; level_idx++) {
             uint32_t level_width = max(1u, base_width >> level_idx);
             uint32_t level_height = max(1u, base_height >> level_idx);
-            vector<float> mip(level_width * level_height * num_components);
+            mips.emplace_back(level_width * level_height * num_components);
 
-            resampleHDR(mip.data(), base_data,
+            resampleHDR(mips.back().data(), base_data,
                         base_width, base_height, level_width, level_height,
                         num_components);
 
-            file.write((char *)&level_width, sizeof(uint32_t));
-            file.write((char *)&level_height, sizeof(uint32_t));
-            file.write((char *)mip.data(), sizeof(float) * mip.size());
+            cur_offset += alignOffset(mips.back().size() * sizeof(float),
+                                      level_alignment);
         }
+
+        auto write_pad = [&](uint32_t pad_bytes) {
+            for (int i = 0; i < (int)pad_bytes; i++) {
+                file.put(0);
+            }
+        };
+
+        file.write((char *)&cur_offset, sizeof(uint64_t));
+        auto data_start = file.tellp();
+        file.write((char *)base_data, top_bytes);
+
+        uint64_t top_rounded = alignOffset(top_bytes, level_alignment);
+        write_pad(top_rounded - top_bytes);
+
+        for (const auto &cur_mip : mips) {
+            uint64_t level_bytes = sizeof(float) * cur_mip.size();
+            file.write((char *)cur_mip.data(), level_bytes);
+
+            uint64_t align_bytes = alignOffset(level_bytes, level_alignment);
+            write_pad(align_bytes - level_bytes);
+        }
+
+        auto data_end = file.tellp();
+        assert(data_end - data_start == (int64_t)cur_offset);
     };
 
     ofstream env_out(argv[2], ios::binary);
     generateAndWriteMips(env_out, src_width, src_height,
-                         src_channels, src_data.data());
+                         4, src_data.data());
 
 
     auto rgbToLuminance = [](float r, float g, float b) {
