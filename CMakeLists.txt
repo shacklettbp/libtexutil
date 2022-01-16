@@ -103,3 +103,11 @@ add_executable(generate_tex
 target_link_libraries(generate_tex
     PRIVATE texutil
 )
+
+add_executable(process_envmap
+    process_envmap.cpp
+)
+
+target_link_libraries(process_envmap
+    PRIVATE texutil OpenImageIO
+)

@@ -208,6 +208,106 @@ static void resample(uint8_t *dst_ptr, uint8_t *src_ptr, bool srgb,
       delete resamplers[i];
 }
 
+static void resampleHDR(float *dst_ptr, float *src_ptr,
+                        basisu::Resampler::Boundary_Op wrapMode,
+                        uint32_t src_w, uint32_t src_h,
+                        uint32_t dst_w, uint32_t dst_h,
+                        uint32_t num_components)
+{
+    using namespace basisu;
+
+    const char *pFilter = "lanczos4";
+    const float filter_scale = 1.f;
+
+    auto dst = [&](int x, int y, int c) -> float& {
+        return dst_ptr[(y * dst_w + x) * num_components + c];
+    };
+
+    auto src = [&](int x, int y, int c) -> float& {
+        return src_ptr[(y * src_w + x) * num_components + c];
+    };
+
+    assert(src_w && src_h && dst_w && dst_h);
+
+    if (max(src_w, src_h) > BASISU_RESAMPLER_MAX_DIMENSION
+        || max(dst_w, dst_h) > BASISU_RESAMPLER_MAX_DIMENSION)
+    {
+        std::stringstream message;
+        message << "Image larger than max supported size of "
+                << BASISU_RESAMPLER_MAX_DIMENSION;
+        throw std::runtime_error(message.str());
+    }
+
+    std::vector<float> samples[4];
+    Resampler *resamplers[4];
+
+    resamplers[0] = new Resampler(src_w, src_h, dst_w, dst_h,
+                                  wrapMode,
+                                  0.0f, 1.0f,
+                                  pFilter, nullptr, nullptr,
+                                  filter_scale, filter_scale,
+                                  0, 0);
+    checkResamplerStatus(*resamplers[0]);
+    samples[0].resize(src_w);
+
+    for (uint32_t i = 1; i < num_components; ++i)
+    {
+        resamplers[i] = new Resampler(src_w, src_h, dst_w, dst_h,
+                                      wrapMode,
+                                      0.0f, 1.0f,
+                                      pFilter,
+                                      resamplers[0]->get_clist_x(),
+                                      resamplers[0]->get_clist_y(),
+                                      filter_scale, filter_scale,
+                                      0, 0);
+        checkResamplerStatus(*resamplers[i]);
+        samples[i].resize(src_w);
+    }
+    uint32_t dst_y = 0;
+
+    for (uint32_t src_y = 0; src_y < src_h; ++src_y)
+    {
+        // Put source lines into resampler(s)
+        for (uint32_t x = 0; x < src_w; ++x)
+        {
+            for (uint32_t ci = 0; ci < num_components; ++ci)
+            {
+                samples[ci][x] = src(x, src_y, ci);
+            }
+        }
+
+      for (uint32_t ci = 0; ci < num_components; ++ci)
+      {
+          if (!resamplers[ci]->put_line(&samples[ci][0]))
+          {
+              checkResamplerStatus(*resamplers[ci]);
+          }
+      }
+
+      // Now retrieve any output lines
+      for (;;) {
+        uint32_t ci;
+        for (ci = 0; ci < num_components; ++ci) {
+            const float *pOutput_samples = resamplers[ci]->get_line();
+            if (!pOutput_samples)
+                break;
+
+            for (uint32_t x = 0; x < dst_w; x++) {
+                dst(x, dst_y, ci) = pOutput_samples[x];
+            }
+        }
+
+        if (ci < num_components)
+            break;
+
+        ++dst_y;
+      }
+  }
+
+  for (uint32_t i = 0; i < num_components; ++i)
+      delete resamplers[i];
+}
+
 using CompressedMip = rdo_bc::rdo_bc_encoder;
 
 enum class BlockFormat {
@@ -541,6 +641,16 @@ void generateMips(const char *out_path, TextureType tex_type,
         out_file.write((const char *)(compressed[level_idx].data()), 
                        compressed[level_idx].size());
     }
+}
+
+void resampleHDR(float *dst_ptr, float *src_ptr,
+                 uint32_t src_w, uint32_t src_h,
+                 uint32_t dst_w, uint32_t dst_h,
+                 uint32_t num_components)
+{
+    ::resampleHDR(dst_ptr, src_ptr,
+                  basisu::Resampler::Boundary_Op::BOUNDARY_CLAMP,
+                  src_w, src_h, dst_w, dst_h, num_components);
 }
 
 }
