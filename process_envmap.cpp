@@ -116,7 +116,59 @@ int main(int argc, char *argv[])
         return 0.2126f * r + 0.7152f * g + 0.0722f * b;
     };
 
-    auto getLuminance = [&](float u, float v) {
+    auto octSphereMap = [](float u, float v) {
+        auto sign = [](float x) {
+            return x > 0.f ? 1.f : (
+                x == 0.f ? 0.f : (
+                    -1.f
+                )
+            );
+        };
+
+        u = u * 2.f - 1.f;
+        v = v * 2.f - 1.f;
+    
+        // Compute radius r (branchless)
+        float d = 1.f - (fabsf(u) + fabsf(v));
+        float r = 1.f - fabsf(d);
+    
+        // Compute phi in the first quadrant (branchless, except for the
+        // division-by-zero test), using sign(u) to map the result to the
+        // correct quadrant below
+        float phi = (r == 0.f) ? 0.f :
+            M_PI_4 * ((fabsf(v) - fabsf(u)) / r + 1.f);
+    
+        float f = r * sqrtf(2.f - r * r);
+        float x = f * sign(u) * cosf(phi);
+        float y = f * sign(v) * sinf(phi);
+        float z = sign(d) * (1.f - r * r);
+    
+        return tuple {
+            x, y, z,
+        };
+    };
+
+    auto dirToLatLong = [](auto dir) {
+        float dir_len = sqrtf(
+            get<0>(dir) * get<0>(dir) +
+            get<1>(dir) * get<1>(dir) +
+            get<2>(dir) * get<2>(dir));
+
+        float nx = get<0>(dir) / dir_len;
+        float ny = get<1>(dir) / dir_len;
+        float nz = get<2>(dir) / dir_len;
+
+        return pair {
+            atan2f(nx, -nz) * (M_1_PI / 2.f) + 0.5f,
+            acosf(ny) * M_1_PI,
+        };
+    };
+
+    auto getLuminance = [&](float imp_u, float imp_v) {
+        auto env_dir = octSphereMap(imp_u, imp_v);
+
+        auto [u, v] = dirToLatLong(env_dir);
+
         float pos_x = u * src_width - 0.5f;
         float pos_y = v * src_height - 0.5f;
 
@@ -135,7 +187,7 @@ int main(int argc, char *argv[])
         up_y = std::clamp(up_y, 0u, src_height - 1); 
 
         auto getRGB = [&](uint32_t x, uint32_t y) {
-            uint32_t base = 3 * (y * src_width + x);
+            uint32_t base = 4 * (y * src_width + x);
 
             return array<float, 3> {
                 src_data[base],
@@ -175,8 +227,8 @@ int main(int argc, char *argv[])
     float imp_per_sample = 1.f / (float(imp_dim) * float(num_samples));
     for (int y = 0; y < (int)imp_dim; y++) {
         for (int x = 0; x < (int)imp_dim; x++) {
-            float base_x = imp_per_sample * num_samples * x;
-            float base_y = imp_per_sample * num_samples * y;
+            float base_x = imp_per_sample * ((float)num_samples * x + 0.5f);
+            float base_y = imp_per_sample * ((float)num_samples * y + 0.5f);
 
             float avg_luminance = 0;
             for (int i = 0; i < num_samples; i++) {
@@ -194,13 +246,17 @@ int main(int argc, char *argv[])
         }
     }
 
-#if 0
     auto tmp_out = ImageOutput::create("/tmp/t.exr");
     ImageSpec tmp_spec(imp_dim, imp_dim, 1, TypeDesc::FLOAT);
     tmp_out->open("/tmp/t.exr", tmp_spec);
     tmp_out->write_image(TypeDesc::FLOAT, imp_data.data());
     tmp_out->close();
-#endif
+
+    auto tmp2_out = ImageOutput::create("/tmp/t2.exr");
+    ImageSpec tmp2_spec(src_width, src_height, 4, TypeDesc::FLOAT);
+    tmp2_out->open("/tmp/t2.exr", tmp2_spec);
+    tmp2_out->write_image(TypeDesc::FLOAT, src_data.data());
+    tmp2_out->close();
 
     generateAndWriteMips(env_out, imp_dim, imp_dim, 1, imp_data.data());
 }
