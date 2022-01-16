@@ -225,6 +225,8 @@ int main(int argc, char *argv[])
 
     int num_samples = 4;
     float imp_per_sample = 1.f / (float(imp_dim) * float(num_samples));
+
+    double total_luminance = 0.f;
     for (int y = 0; y < (int)imp_dim; y++) {
         for (int x = 0; x < (int)imp_dim; x++) {
             float base_x = imp_per_sample * ((float)num_samples * x + 0.5f);
@@ -243,7 +245,12 @@ int main(int argc, char *argv[])
             }
 
             imp_data[y * imp_dim + x] = avg_luminance;
+            total_luminance += avg_luminance;
         }
+    }
+
+    for (auto &l : imp_data) {
+        l /= total_luminance;
     }
 
     auto tmp_out = ImageOutput::create("/tmp/t.exr");
