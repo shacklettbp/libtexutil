@@ -53,7 +53,8 @@ int main(int argc, char *argv[])
                                    uint32_t base_width,
                                    uint32_t base_height,
                                    uint32_t num_components,
-                                   float *base_data) {
+                                   float *base_data,
+                                   bool use_kaiser) {
         const uint32_t level_alignment = 16;
         uint32_t num_mips = log2(max(base_width, base_height)) + 1;
 
@@ -69,14 +70,36 @@ int main(int argc, char *argv[])
 
         uint64_t cur_offset = alignOffset(top_bytes, level_alignment);
 
+        float *prev_mip = base_data;
+        uint32_t prev_width = base_width;
         for (int level_idx = 1; level_idx < (int)num_mips; level_idx++) {
             uint32_t level_width = max(1u, base_width >> level_idx);
             uint32_t level_height = max(1u, base_height >> level_idx);
             mips.emplace_back(level_width * level_height * num_components);
 
-            resampleHDR(mips.back().data(), base_data,
-                        base_width, base_height, level_width, level_height,
-                        num_components);
+            if (use_kaiser) {
+                resampleHDR(mips.back().data(), base_data,
+                            base_width, base_height, level_width, level_height,
+                            num_components);
+            } else {
+                auto getPrev = [&](int x, int y, int c) {
+                    return prev_mip[num_components * (y * prev_width + x) + c];
+                };
+
+                for (int y = 0; y < (int)level_height; y++) {
+                    for (int x = 0; x < (int)level_width; x++) {
+                        for (int c = 0; c < (int)num_components; c++) {
+                            mips.back()[num_components * (y * level_width + x) + c] =
+                                (getPrev(2 * x, 2 * y, c) +
+                                 getPrev(2 * x + 1, 2 * y, c) +
+                                 getPrev(2 * x, 2 * y + 1, c) +
+                                 getPrev(2 * x + 1, 2 * y + 1, c)) / 4.f;
+                        }
+                    }
+                }
+                prev_mip = mips.back().data();
+                prev_width = level_width;
+            }
 
             cur_offset += alignOffset(mips.back().size() * sizeof(float),
                                       level_alignment);
@@ -109,7 +132,7 @@ int main(int argc, char *argv[])
 
     ofstream env_out(argv[2], ios::binary);
     generateAndWriteMips(env_out, src_width, src_height,
-                         4, src_data.data());
+                         4, src_data.data(), true);
 
 
     auto rgbToLuminance = [](float r, float g, float b) {
@@ -117,12 +140,11 @@ int main(int argc, char *argv[])
     };
 
     auto octSphereMap = [](float u, float v) {
-        auto sign = [](float x) {
-            return x > 0.f ? 1.f : (
-                x == 0.f ? 0.f : (
-                    -1.f
-                )
-            );
+        auto signPreserveZero = [](float v) {
+            int32_t i;
+            memcpy(&i, &v, sizeof(float));
+
+            return (i < 0) ? -1.0 : 1.0;
         };
 
         u = u * 2.f - 1.f;
@@ -136,12 +158,12 @@ int main(int argc, char *argv[])
         // division-by-zero test), using sign(u) to map the result to the
         // correct quadrant below
         float phi = (r == 0.f) ? 0.f :
-            M_PI_4 * ((fabsf(v) - fabsf(u)) / r + 1.f);
+            (M_PI_4 * ((fabsf(v) - fabsf(u)) / r + 1.f));
     
         float f = r * sqrtf(2.f - r * r);
-        float x = f * sign(u) * cosf(phi);
-        float y = f * sign(v) * sinf(phi);
-        float z = sign(d) * (1.f - r * r);
+        float x = signPreserveZero(u) * abs(f * cosf(phi));
+        float y = signPreserveZero(v) * abs(f * sinf(phi));
+        float z = signPreserveZero(d) * (1.f - r * r);
     
         return tuple {
             x, y, z,
@@ -232,7 +254,7 @@ int main(int argc, char *argv[])
             float base_x = imp_per_sample * ((float)num_samples * x + 0.5f);
             float base_y = imp_per_sample * ((float)num_samples * y + 0.5f);
 
-            float avg_luminance = 0;
+            float pixel_avg_luminance = 0;
             for (int i = 0; i < num_samples; i++) {
                 for (int j = 0; j < num_samples; j++) {
                     float u = base_x + i * imp_per_sample;
@@ -240,17 +262,18 @@ int main(int argc, char *argv[])
 
                     float luminance = getLuminance(u, v);
 
-                    avg_luminance += luminance / (num_samples * num_samples);
+                    pixel_avg_luminance += luminance / (num_samples * num_samples);
                 }
             }
 
-            imp_data[y * imp_dim + x] = avg_luminance;
-            total_luminance += avg_luminance;
+            imp_data[y * imp_dim + x] = pixel_avg_luminance;
+            total_luminance += pixel_avg_luminance;
         }
     }
 
+    float luminance_rescale = ((double)imp_dim * (double)imp_dim) / total_luminance;
     for (auto &l : imp_data) {
-        l /= total_luminance;
+        l *= luminance_rescale;
     }
 
 #if 0
@@ -267,5 +290,5 @@ int main(int argc, char *argv[])
     tmp2_out->close();
 #endif
 
-    generateAndWriteMips(env_out, imp_dim, imp_dim, 1, imp_data.data());
+    generateAndWriteMips(env_out, imp_dim, imp_dim, 1, imp_data.data(), false);
 }

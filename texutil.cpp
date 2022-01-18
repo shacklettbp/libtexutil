@@ -216,7 +216,7 @@ static void resampleHDR(float *dst_ptr, float *src_ptr,
 {
     using namespace basisu;
 
-    const char *pFilter = "lanczos4";
+    const char *pFilter =  "kaiser";
     const float filter_scale = 1.f;
 
     auto dst = [&](int x, int y, int c) -> float& {
